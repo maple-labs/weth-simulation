@@ -1,0 +1,3 @@
+[submodule "modules/contract-test-suite"]
+	path = modules/contract-test-suite
+	url = git@github.com:maple-labs/contract-test-suite.git
