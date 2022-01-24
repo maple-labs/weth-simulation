@@ -1,22 +1,8 @@
 {
   "language": "Solidity",
   "sources": {
-    "contracts/test/ClaimTest.t.sol": {
-      "urls": ["contracts/test/ClaimTest.t.sol"]
-    },
-    "contracts/test/ParityTest.t.sol": {
-      "urls": ["contracts/test/ParityTest.t.sol"]
-    },
-    "contracts/test/PaymentsTest.t.sol": {
-      "urls": ["contracts/test/PaymentsTest.t.sol"]
-    },
-    "contracts/test/UpgradeTest.t.sol": {
-      "urls": ["contracts/test/UpgradeTest.t.sol"]
-    },
-    "contracts/test/RefinanceTest.t.sol": {
-      "urls": [
-        "contracts/test/RefinanceTest.t.sol"
-      ]
+    "contracts/test/WethSimulation.t.sol": {
+      "urls": ["contracts/test/WethSimulation.t.sol"]
     }
   },
   "settings": {
