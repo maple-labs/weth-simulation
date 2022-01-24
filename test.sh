@@ -17,4 +17,4 @@ if [ -z "$test" ]; then match="[src/test/*.t.sol]"; else match=$test; fi
 
 rm -rf out
 
-forge test --match "$match" -vvv --lib-paths "modules"
+forge test --match "$match" -vvv --lib-paths "modules" --fork-url "$ETH_RPC_URL"

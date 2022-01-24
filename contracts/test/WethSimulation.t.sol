@@ -35,6 +35,8 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         calcs = [REPAYMENT_CALC, LATEFEE_CALC, PREMIUM_CALC];
 
+        oracleMock = new WETHOracleMock();
+
         _setUpMapleWethPool();
     }
 
@@ -115,6 +117,10 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         poolDelegate.approve(address(bPool), pool.stakeLocker(), type(uint256).max);
         poolDelegate.stake(pool.stakeLocker(), bPool.balanceOf(address(poolDelegate)));
         poolDelegate.finalize(address(pool));
+
+        //mint to pool
+        erc20_mint(WETH, 3, address(pool), 1e26);
+        emit log_named_uint("bal", ERC20Like(WETH).balanceOf(address(pool)));
     }
 
      function _createLoan(Borrower borrower, uint256[5] memory specs) internal returns (address loan) {
