@@ -5,30 +5,24 @@ import { ERC20Like, LoanFactoryLike, LoanLike } from "../../interfaces/Interface
 
 contract Borrower {
 
-    function makePayment(address loan) external {
-        LoanLike(loan).makePayment();
+    function loan_makePayment(address loan_, uint256 amount_) external returns (uint256 totalPrincipalAmount_, uint256 totalInterestFees_) {
+        return LoanLike(loan_).makePayment(amount_);
     }
 
-    function drawdown(address loan, uint256 drawdownAmount) external {
-        LoanLike(loan).drawdown(drawdownAmount);
+    function loan_drawdownFunds(address loan_, uint256 amount_, address destination_) external returns (uint256 collateralPosted_) {
+        return LoanLike(loan_).drawdownFunds(amount_, destination_);
     }
 
     function approve(address token, address account, uint256 amt) external {
         ERC20Like(token).approve(account, amt);
     }
 
-    function createLoan(
-        address loanFactory,
-        address liquidityAsset,
-        address collateralAsset,
-        address flFactory,
-        address clFactory,
-        uint256[5] memory specs,
-        address[3] memory calcs
-    )
-        external returns (address loan)
-    {
-        return LoanFactoryLike(loanFactory).createLoan(liquidityAsset, collateralAsset, flFactory, clFactory, specs, calcs);
+     function try_mapleProxyFactory_createInstance(address factory_, bytes calldata arguments_, bytes32 salt_) external returns (bool ok_) {
+        ( ok_, ) = factory_.call(abi.encodeWithSelector(LoanFactoryLike.createInstance.selector, arguments_, salt_));
+    }
+
+    function mapleProxyFactory_createInstance(address factory_, bytes calldata arguments_, bytes32 salt_) external returns (address instance_) {
+        return LoanFactoryLike(factory_).createInstance(arguments_, salt_);
     }
 
 }

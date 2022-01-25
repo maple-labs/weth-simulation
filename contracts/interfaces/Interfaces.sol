@@ -31,15 +31,25 @@ interface Hevm {
 }
 
 interface LoanFactoryLike {
-    function createLoan(address, address, address, address, uint256[5] memory, address[3] memory) external returns (address);
+    function createInstance(bytes calldata arguments_, bytes32 salt_) external returns (address instance_);
+}
+
+interface LoanInitializerLike {
+    function encodeArguments(
+        address borrower_,
+        address[2] memory assets_,
+        uint256[3] memory termDetails_,
+        uint256[3] memory amounts_,
+        uint256[4] memory rates_
+    ) external pure returns (bytes memory encodedArguments_);
 }
 
 interface LoanLike {
-    function collateralRequiredForDrawdown(uint256) external view returns (uint256);
-    function drawdown(uint256) external;
-    function getNextPayment() external returns (uint256, uint256, uint256);
-    function nextPaymentDue() external returns (uint256);
-    function makePayment() external;
+    function getAdditionalCollateralRequiredFor(uint256 drawdown_) external view returns (uint256 additionalCollateral_);
+    function drawdownFunds(uint256 amount_, address destination_) external returns (uint256 collateralPosted_);
+    function getNextPaymentBreakdown() external view returns (uint256 totalPrincipalAmount_, uint256 totalInterestFees_);
+    function nextPaymentDueDate() external view returns (uint256 nextPaymentDueDate_);
+    function makePayment(uint256 amount_) external returns (uint256 principal_, uint256 interest_);
 }
 
 interface MapleGlobalsLike {
@@ -57,6 +67,7 @@ interface PoolFactoryLike {
 interface PoolLike {
     function balanceOf(address) external view returns (uint256);
     function claim(address, address) external returns (uint256[7] memory);
+    function deposit(uint256 amount_) external;
     function getInitialStakeRequirements() external view returns (uint256, uint256, bool, uint256, uint256);
     function getPoolSharesRequired(address, address, address, address, uint256) external view returns(uint256, uint256);
     function finalize() external;
@@ -64,7 +75,9 @@ interface PoolLike {
     function liquidityLocker() external view returns (address);
     function stakeLocker() external returns (address);
     function setAllowList(address, bool) external;
+    function setOpenToPublic(bool open) external;
     function superFactory() external view returns (address);
+    function triggerDefault(address loan, address dlFactory) external;
     function withdrawableFundsOf(address) external view returns (uint256);
     function withdrawCooldown(address) external view returns (uint256);
 }

@@ -8,7 +8,7 @@ import { PoolDelegate } from "./accounts/PoolDelegate.sol";
 
 import { WETHOracleMock } from "./mocks/Mocks.sol"; 
 
-import { BPoolLike, BPoolFactoryLike, ERC20Like, Hevm, LoanLike, MapleGlobalsLike, PoolLike } from "../interfaces/Interfaces.sol";
+import { BPoolLike, BPoolFactoryLike, ERC20Like, Hevm, LoanInitializerLike, LoanLike, MapleGlobalsLike, PoolLike } from "../interfaces/Interfaces.sol";
 
 import { AddressRegistry } from "../AddressRegistry.sol";
 
@@ -17,15 +17,17 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
     uint256 constant WAD = 10 ** 18;
     uint256 constant RAY = 10 ** 27;
     uint256 constant RAD = 10 ** 45;
+    uint256 constant BTC = 10 ** 8;  
+    uint256 constant USD = 10 ** 6;
 
     address[3] calcs;
 
     ERC20Like constant weth = ERC20Like(WETH);
     ERC20Like constant mpl = ERC20Like(MPL);
 
-    PoolDelegate   poolDelegate;
-    PoolLike       pool;
-    WETHOracleMock oracleMock;
+    PoolDelegate      poolDelegate;
+    PoolLike          pool;
+    WETHOracleMock    oracleMock;
 
     uint256 start;
 
@@ -40,24 +42,80 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         _setUpMapleWethPool();
     }
 
-    function test_basic_e2eLoan() external {
+    function test_simpleLoan() external {
 
         Borrower borrower = new Borrower();
 
-        LoanLike loan = LoanLike(_createLoan(borrower, [1000, 180, 30, uint256(1_000_000 * WAD), 2000]));
+        emit log("after borrower");
+
+        LoanLike loan = LoanLike(_createLoan(borrower, 0, 1_000_000 * WAD));
+
+        /*************************************/
+        /*** Drawdown and make 1st payment ***/
+        /*************************************/
 
         _fundLoanAndDrawdown(borrower, address(loan), 1_000_000 * WAD);
 
-        hevm.warp(start + 30 days);
+        // hevm.warp(start + 30 days);
 
-        _makePayment(address(loan), address(borrower));
+        // _makePayment(address(loan), address(borrower));
 
-        /********************************/
-        /*** Claim Interest into Pool ***/
-        /********************************/
+        // /********************************/
+        // /*** Claim Interest into Pool ***/
+        // /********************************/
 
+        // uint256 poolBalanceBefore = weth.balanceOf(address(pool));
 
+        // poolDelegate.claim(address(pool), address(loan), DL_FACTORY);
+
+        // uint256 poolBalanceAfter = weth.balanceOf(address(pool));
+
+        // emit log_named_uint("ball diff", poolBalanceAfter - poolBalanceBefore);
+
+        // // assertTrue(poolBalanceAfter - poolBalanceBefore > 0);
+        // /*************************/
+        // /*** Make last payment ***/
+        // /*************************/
+    
+        // hevm.warp(start + 60 days);
+
+        // _makePayment(address(loan), address(borrower));
+
+        // /********************************/
+        // /*** Claim Interest into Pool ***/
+        // /********************************/
+
+        // poolBalanceBefore = weth.balanceOf(address(pool));
+
+        // poolDelegate.claim(address(pool), address(loan), DL_FACTORY);
+
+        // poolBalanceAfter = weth.balanceOf(address(pool));
+
+        // emit log_named_uint("ball diff", poolBalanceAfter - poolBalanceBefore);
+
+        // assertTrue(poolBalanceAfter - poolBalanceBefore > 0);  
     }
+
+    // function test_defaulted_loan() external {
+    //     Borrower borrower = new Borrower();
+
+    //     LoanLike loan = LoanLike(_createLoan(borrower, [1000, 60, 30, uint256(1_000_000 * WAD), 2000]));
+
+    //     /*************************************/
+    //     /*** Drawdown and make 1st payment ***/
+    //     /*************************************/
+
+    //     _fundLoanAndDrawdown(borrower, address(loan), 1_000_000 * WAD);
+
+    //     hevm.warp(start + 60 days);
+
+    //     /***********************/
+    //     /*** Trigger default ***/
+    //     /***********************/
+
+    //     poolDelegate.triggerDefault(address(pool), address(loan), DL_FACTORY);
+
+    // }
 
     /************************/
     /*** Helper Functions ***/
@@ -117,34 +175,58 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         poolDelegate.approve(address(bPool), pool.stakeLocker(), type(uint256).max);
         poolDelegate.stake(pool.stakeLocker(), bPool.balanceOf(address(poolDelegate)));
         poolDelegate.finalize(address(pool));
+        poolDelegate.setOpenToPublic(address(pool), true);
 
         //mint to pool
-        erc20_mint(WETH, 3, address(pool), 1e26);
-        emit log_named_uint("bal", ERC20Like(WETH).balanceOf(address(pool)));
+        erc20_mint(WETH, 3, address(this), 2_000_000 ether);
+        weth.approve(address(pool), 2_000_000 ether);
+
+        pool.deposit(2_000_000 ether);
     }
 
-     function _createLoan(Borrower borrower, uint256[5] memory specs) internal returns (address loan) {
-        return borrower.createLoan(LOAN_FACTORY, WETH, WBTC, FL_FACTORY, CL_FACTORY, specs, calcs);
+     function _createLoan(Borrower borrower, uint256 collaretalRequired, uint256 principalRequested) internal returns (address loan) {
+        address[2] memory assets = [WBTC, WETH];
+
+        uint256[3] memory termDetails = [
+            uint256(10 days),  // 10 day grace period
+            uint256(30 days),  // 30 day payment interval
+            uint256(3)
+        ];
+
+        // 250 BTC @ $58k = $14.5m = 14.5% collateralized, interest only
+        uint256[3] memory requests = [collaretalRequired, principalRequested, principalRequested];  
+
+        uint256[4] memory rates = [uint256(0.12e18), uint256(0), uint256(0), uint256(0.6e18)];
+
+  
+        bytes memory arguments = LoanInitializerLike(LOAN_INITIALIZER).encodeArguments(address(borrower), assets, termDetails, requests, rates);
+
+        bytes32 salt = keccak256(abi.encodePacked("salt"));
+
+        loan = borrower.mapleProxyFactory_createInstance(address(LOAN_FACTORY), arguments, salt);
     }
 
     function _fundLoanAndDrawdown(Borrower borrower, address loan, uint256 fundAmount) internal {
         poolDelegate.fundLoan(address(pool), loan, DL_FACTORY, fundAmount);
 
-        uint256 collateralRequired = LoanLike(loan).collateralRequiredForDrawdown(fundAmount);
+        // uint256 collateralRequired = LoanLike(loan).getAdditionalCollateralRequiredFor(fundAmount);
 
-        if (collateralRequired > 0) {
-            erc20_mint(WBTC, 0, address(borrower), collateralRequired);
-            borrower.approve(WBTC, loan, collateralRequired);
-        }
+        // if (collateralRequired > 0) {
+        //     erc20_mint(WBTC, 0, address(borrower), collateralRequired);
+        //     borrower.approve(WBTC, loan, collateralRequired);
+        // }
         
-        borrower.drawdown(loan, fundAmount);
+        borrower.loan_drawdownFunds(loan, fundAmount, address(borrower));
     }
 
-    function _makePayment(address loan, address borrower) internal {
-        ( uint256 paymentAmount, , ) = LoanLike(loan).getNextPayment();
-        erc20_mint(WETH, 3, address(borrower), paymentAmount);
-        Borrower(borrower).approve(WETH, loan, paymentAmount);
-        Borrower(borrower).makePayment(loan);
+    function _makePayment(address loan, address borrower) internal returns (uint256 principalPortion, uint256 interestPortion) {
+        ( principalPortion, interestPortion ) = LoanLike(loan).getNextPaymentBreakdown();
+
+        uint256 total = principalPortion + interestPortion;
+
+        erc20_mint(WETH, 3, address(borrower), total);
+        Borrower(borrower).approve(WETH, loan, total);
+        Borrower(borrower).loan_makePayment(loan, total);
     }
 }
 

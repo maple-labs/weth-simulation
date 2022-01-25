@@ -48,8 +48,16 @@ contract PoolDelegate {
         PoolLike(pool).setAllowList(account, status);
     }
 
+    function setOpenToPublic(address pool, bool status) external {
+        PoolLike(pool).setOpenToPublic(status);
+    }
+
     function stake(address stakeLocker, uint256 amt) external {
         StakeLockerLike(stakeLocker).stake(amt);
+    }
+
+    function triggerDefault(address pool, address loan, address dlFactory) external {
+        PoolLike(pool).triggerDefault(loan, dlFactory);
     }
     
 }
