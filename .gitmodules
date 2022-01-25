@@ -1,3 +1,6 @@
 [submodule "modules/contract-test-utils"]
 	path = modules/contract-test-utils
 	url = git@github.com:maple-labs/contract-test-utils.git
+[submodule "modules/loan"]
+	path = modules/loan
+	url = https://github.com/maple-labs/loan
