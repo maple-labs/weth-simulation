@@ -3,6 +3,8 @@ pragma solidity 0.8.7;
 
 import { ERC20Like, PoolFactoryLike, PoolLike, StakeLockerLike } from "../../interfaces/Interfaces.sol";
 
+import { IDebtLocker } from "../../../modules/debt-locker/contracts/interfaces/IDebtLocker.sol";
+
 contract PoolDelegate {
 
     function approve(address token, address account, uint256 amt) external {
@@ -34,6 +36,15 @@ contract PoolDelegate {
             delegateFee,
             liquidityCap
         );
+    }
+
+
+    function debtLocker_setAllowedSlippage(address debtLocker_, uint256 slippage_) external {
+        IDebtLocker(debtLocker_).setAllowedSlippage(slippage_);
+    }
+
+    function debtLocker_setMinRatio(address debtLocker_, uint256 slippage_) external {
+        IDebtLocker(debtLocker_).setMinRatio(slippage_);
     }
 
     function finalize(address pool) external {

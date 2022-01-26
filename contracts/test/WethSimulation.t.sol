@@ -3,14 +3,25 @@ pragma solidity 0.8.7;
 
 import { TestUtils, StateManipulations } from "../../modules/contract-test-utils/contracts/test.sol";
 
-import { IMapleLoan } from "../../modules/loan/contracts/interfaces/IMapleLoan.sol";
+import { IMapleLoan } from "../../modules/loan/contracts/interfaces/IMapleLoan.sol";    
+
+import { IDebtLocker } from "../../modules/debt-locker/contracts/interfaces/IDebtLocker.sol";
 
 import { Borrower }     from "./accounts/Borrower.sol";
+import { Keeper }       from "./accounts/Keeper.sol";
 import { PoolDelegate } from "./accounts/PoolDelegate.sol";
+
+import { IPoolLibLike, StakeLockerLike } from "../interfaces/Interfaces.sol";
+
+import { SushiswapStrategy } from "../../modules/liquidations/contracts/SushiswapStrategy.sol";
+import { UniswapV2Strategy } from "../../modules/liquidations/contracts/UniswapV2Strategy.sol";
+import { Liquidator }        from "../../modules/liquidations/contracts/Liquidator.sol";
+import { Rebalancer }        from "../../modules/liquidations/contracts/test/mocks/Mocks.sol";
+
 
 import { WETHOracleMock } from "./mocks/Mocks.sol";
 
-import { BPoolLike, BPoolFactoryLike, ERC20Like, Hevm, LoanInitializerLike, LoanLike, MapleGlobalsLike, PoolLike } from "../interfaces/Interfaces.sol";
+import { BPoolLike, BPoolFactoryLike, ERC20Like, Hevm, LoanInitializerLike, MapleGlobalsLike, PoolLike } from "../interfaces/Interfaces.sol";
 
 import { AddressRegistry } from "../AddressRegistry.sol";
 
@@ -25,8 +36,10 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
     address[3] calcs;
 
     ERC20Like constant weth = ERC20Like(WETH);
+    ERC20Like constant wbtc = ERC20Like(WBTC);
     ERC20Like constant mpl = ERC20Like(MPL);
 
+    BPoolLike         bPool;
     PoolDelegate      poolDelegate;
     PoolLike          pool;
     WETHOracleMock    oracleMock;
@@ -44,80 +57,254 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         _setUpMapleWethPool();
     }
 
-    function test_simpleLoan() external {
+    function test_loan_endToEnd() external {
 
         Borrower borrower = new Borrower();
 
-        emit log("after borrower");
-
-        LoanLike loan = LoanLike(_createLoan(borrower, 0, 1_000_000 * WAD));
-
-        /*************************************/
-        /*** Drawdown and make 1st payment ***/
-        /*************************************/
+        /********************************/
+        /*** Create and drawdown loan ***/
+        /********************************/
+        IMapleLoan loan = IMapleLoan(_createLoan(borrower, 0, 1_000_000 * WAD));
 
         _fundLoanAndDrawdown(borrower, address(loan), 1_000_000 * WAD);
 
-        hevm.warp(start + 30 days);
-
-        _makePayment(address(loan), address(borrower));
-
         /********************************/
-        /*** Claim Interest into Pool ***/
+        /*** Make Payment 1 (On time) ***/
         /********************************/
 
-        uint256 poolBalanceBefore = weth.balanceOf(address(pool));
+        hevm.warp(loan.nextPaymentDueDate());
 
-        poolDelegate.claim(address(pool), address(loan), DL_FACTORY);
+        // Check details for upcoming payment #1
+        ( uint256 principalPortion, uint256 interestPortion ) = loan.getNextPaymentBreakdown();
 
-        uint256 poolBalanceAfter = weth.balanceOf(address(pool));
+        assertEq(weth.balanceOf(address(loan)), 0);
 
-        emit log_named_uint("ball diff", poolBalanceAfter - poolBalanceBefore);
+        // Make first payment
+        erc20_mint(WETH, 3, address(borrower), interestPortion);
+        borrower.erc20_approve(WETH, address(loan), interestPortion);
+        borrower.loan_makePayment(address(loan), interestPortion);
 
-        // // assertTrue(poolBalanceAfter - poolBalanceBefore > 0);
-        // /*************************/
-        // /*** Make last payment ***/
-        // /*************************/
+        assertEq(weth.balanceOf(address(loan)), interestPortion);
 
-        // hevm.warp(start + 60 days);
+        /************************************/
+        /*** Claim Funds as Pool Delegate ***/
+        /************************************/
 
-        // _makePayment(address(loan), address(borrower));
+        uint256 pool_principalOut = pool.principalOut();
+        uint256 pool_interestSum  = pool.interestSum();
 
-        // /********************************/
-        // /*** Claim Interest into Pool ***/
-        // /********************************/
+        uint256 weth_liquidityLockerBal = weth.balanceOf(pool.liquidityLocker());
+        uint256 weth_stakeLockerBal     = weth.balanceOf(pool.stakeLocker());
 
-        // poolBalanceBefore = weth.balanceOf(address(pool));
+        uint256[7] memory details = poolDelegate.claim(address(pool), address(loan), address(DL_FACTORY));
 
-        // poolDelegate.claim(address(pool), address(loan), DL_FACTORY);
+        assertEq(weth.balanceOf(address(loan)), 0);
 
-        // poolBalanceAfter = weth.balanceOf(address(pool));
+        assertEq(details[0], interestPortion);
+        assertEq(details[1], interestPortion);
 
-        // emit log_named_uint("ball diff", poolBalanceAfter - poolBalanceBefore);
+        uint256 ongoingFee = interestPortion * 1000 / 10_000;  // Applies to both StakeLocker and Pool Delegate since both have 10% ongoing fees
 
-        // assertTrue(poolBalanceAfter - poolBalanceBefore > 0);
+        assertEq(pool.principalOut(),                    pool_principalOut       += 0);
+        assertEq(pool.interestSum(),                     pool_interestSum        += interestPortion - 2 * ongoingFee);  // 80% of interest
+        assertEq(weth.balanceOf(pool.liquidityLocker()), weth_liquidityLockerBal += interestPortion - 2 * ongoingFee);  // 80% of interest
+        assertEq(weth.balanceOf(pool.stakeLocker()),     weth_stakeLockerBal     += ongoingFee);                        // 10% of interest
+
+        /********************************/
+        /*** Make Payment 2 (On time) ***/
+        /********************************/
+
+        hevm.warp(loan.nextPaymentDueDate()); 
+
+        assertEq(weth.balanceOf(address(loan)), 0);
+
+        // Make second payment
+        erc20_mint(WETH, 3, address(borrower), interestPortion);
+        borrower.erc20_approve(WETH, address(loan), interestPortion);
+        borrower.loan_makePayment(address(loan), interestPortion);
+
+        assertEq(weth.balanceOf(address(loan)), interestPortion);
+
+        /******************************/
+        /*** Make Payment 3 (Final) ***/
+        /******************************/
+
+        hevm.warp(loan.nextPaymentDueDate());
+
+        // Check details for upcoming payment #3
+        ( principalPortion, interestPortion ) = loan.getNextPaymentBreakdown();
+
+        assertEq(weth.balanceOf(address(loan)), interestPortion);
+
+        // Make third payment
+        erc20_mint(WETH, 3, address(borrower), principalPortion + interestPortion);  // Principal + interest
+        borrower.erc20_approve(WETH, address(loan), principalPortion + interestPortion);
+        borrower.loan_makePayment(address(loan), principalPortion + interestPortion);
+
+        /**************************************************/
+        /*** Claim Funds as Pool Delegate (Two Payments ***/
+        /**************************************************/
+        
+        details = poolDelegate.claim(address(pool), address(loan), address(DL_FACTORY));
+
+        assertEq(weth.balanceOf(address(loan)), 0);
+
+        uint256 totalInterest = interestPortion * 2;
+
+        assertEq(details[0], principalPortion + totalInterest);
+        assertEq(details[1], totalInterest);
+        assertEq(details[2], principalPortion);
+        assertEq(details[3], 0);
+        assertEq(details[4], 0);
+        assertEq(details[5], 0);
+        assertEq(details[6], 0);
+
+        ongoingFee = totalInterest * 1000 / 10_000;  // Applies to both StakeLocker and Pool Delegate since both have 10% ongoing fees
+
+        assertEq(pool.principalOut(),                    pool_principalOut       -= principalPortion);
+        assertEq(pool.interestSum(),                     pool_interestSum        += totalInterest - (2 * ongoingFee));                     // 80% of interest
+        assertEq(weth.balanceOf(pool.liquidityLocker()), weth_liquidityLockerBal += principalPortion + totalInterest - (2 * ongoingFee));  // 80% of interest
+        assertEq(weth.balanceOf(pool.stakeLocker()),     weth_stakeLockerBal     += ongoingFee);                                           // 10% of interest
     }
 
-    // function test_defaulted_loan() external {
-    //     Borrower borrower = new Borrower();
+    function test_triggerDefault_underCollateralized() external {
 
-    //     LoanLike loan = LoanLike(_createLoan(borrower, [1000, 60, 30, uint256(1_000_000 * WAD), 2000]));
+        Borrower borrower = new Borrower();
 
-    //     /*************************************/
-    //     /*** Drawdown and make 1st payment ***/
-    //     /*************************************/
+        /********************************/
+        /*** Create and drawdown loan ***/
+        /********************************/
+        IMapleLoan loan = IMapleLoan(_createLoan(borrower, 2 * BTC, 1_000_000 * WAD));
 
-    //     _fundLoanAndDrawdown(borrower, address(loan), 1_000_000 * WAD);
+        _fundLoanAndDrawdown(borrower, address(loan), 1_000_000 * WAD);
 
-    //     hevm.warp(start + 60 days);
+        /********************************/
+        /*** Make Payment 1 (On time) ***/
+        /********************************/
 
-    //     /***********************/
-    //     /*** Trigger default ***/
-    //     /***********************/
+        hevm.warp(loan.nextPaymentDueDate());
 
-    //     poolDelegate.triggerDefault(address(pool), address(loan), DL_FACTORY);
+        // Check details for upcoming payment #1
+        ( , uint256 interestPortion ) = loan.getNextPaymentBreakdown();
+        erc20_mint(WETH, 3, address(borrower), interestPortion);
 
-    // }
+        borrower.erc20_approve(WETH, address(loan), interestPortion);
+        borrower.loan_makePayment(address(loan), interestPortion);
+
+        /************************************/
+        /*** Claim Funds as Pool Delegate ***/
+        /************************************/
+
+        poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        /********************************/
+        /*** Make Payment 2 (On time) ***/
+        /********************************/
+
+        hevm.warp(loan.nextPaymentDueDate());
+
+        // Check details for upcoming payment #2
+        ( , interestPortion ) = loan.getNextPaymentBreakdown();
+
+        // Make second payment
+        erc20_mint(WETH, 3, address(borrower), interestPortion);
+
+        borrower.erc20_approve(WETH, address(loan), interestPortion);
+        borrower.loan_makePayment(address(loan), interestPortion);
+
+        /*******************************/
+        /*** Borrower Misses Payment ***/
+        /*******************************/
+
+        hevm.warp(loan.nextPaymentDueDate() + loan.gracePeriod() + 1);
+
+        /************************************/
+        /*** Claim Funds as Pool Delegate ***/
+        /************************************/
+
+        poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        /**************************************/
+        /*** Pool Delegate triggers default ***/
+        /**************************************/
+
+        hevm.warp(loan.nextPaymentDueDate() + loan.gracePeriod() + 1);
+
+        IDebtLocker debtLocker = IDebtLocker(pool.debtLockers(address(loan), address(DL_FACTORY))); 
+
+        // IDebtLocker State
+        assertTrue( debtLocker.liquidator() == address(0));
+        assertTrue(!debtLocker.repossessed());
+
+        // WETH/WBTC State
+        assertEq(weth.balanceOf(address(loan)),       0);
+        assertEq(weth.balanceOf(address(debtLocker)), 0);
+        assertEq(wbtc.balanceOf(address(loan)),       2 * BTC);
+        assertEq(wbtc.balanceOf(address(debtLocker)), 0);
+
+        poolDelegate.triggerDefault(address(pool),address(loan), address(DL_FACTORY));
+
+        // IDebtLocker State
+        assertTrue(debtLocker.liquidator() != address(0));
+        assertTrue(debtLocker.repossessed());
+
+        // WETH/WBTC State
+        assertEq(weth.balanceOf(address(loan)),                    0);
+        assertEq(weth.balanceOf(address(debtLocker)),              0);
+        assertEq(wbtc.balanceOf(address(loan)),                    0);
+        assertEq(wbtc.balanceOf(address(debtLocker)),              0);
+        assertEq(wbtc.balanceOf(address(debtLocker.liquidator())), 2 * BTC);
+
+        /*******************************************************/
+        /*** Pool Delegate configures liquidation parameters ***/
+        /*******************************************************/
+
+        poolDelegate.debtLocker_setAllowedSlippage(address(debtLocker), 300);        // 3% slippage allowed
+        poolDelegate.debtLocker_setMinRatio(address(debtLocker), 1);  // Minimum 40k USDC per WBTC (Market price is ~43k at block 13276702)
+
+        /**********************************/
+        /*** Collateral gets liquidated ***/
+        /**********************************/
+        Keeper keeper1 = new Keeper();
+
+        UniswapV2Strategy uniswapV2Strategy = new UniswapV2Strategy();
+
+        _liquidate(keeper1, address(uniswapV2Strategy), debtLocker, 2 * BTC);
+
+        /***************************************************************/
+        /*** Pool delegate claims funds, triggering BPT burning flow ***/
+        /***************************************************************/
+
+        // Before state
+        uint256 bpt_stakeLockerBal      = bPool.balanceOf(pool.stakeLocker());
+        uint256 pool_principalOut       = pool.principalOut();
+        uint256 weth_liquidityLockerBal = weth.balanceOf(pool.liquidityLocker());
+
+        StakeLockerLike stakeLocker = StakeLockerLike(pool.stakeLocker());
+
+        uint256 swapOutAmount = IPoolLibLike(ORTHOGONAL_POOL_LIB).getSwapOutValueLocker(address(bPool), WETH, address(stakeLocker));
+
+        uint256[7] memory details = poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        uint256 totalPrincipal = 1_000_000 ether;
+        uint256 totalRecovered = 2447469579;                // Recovered from liquidation
+        uint256 totalShortfall = totalPrincipal - totalRecovered;  
+        uint256 totalBptBurn = bpt_stakeLockerBal - bPool.balanceOf(address(stakeLocker));
+
+        assertEq(details[0], totalRecovered);
+        assertEq(details[1], 0);
+        assertEq(details[2], 0);
+        assertEq(details[3], 0);
+        assertEq(details[4], 0);
+        assertEq(details[5], totalRecovered);
+        assertEq(details[6], totalShortfall);  
+
+        assertEq(bPool.balanceOf(address(stakeLocker)),  bpt_stakeLockerBal - totalBptBurn);                         // Max amount of BPTs were burned
+        assertEq(pool.principalOut(),                    pool_principalOut - totalPrincipal);                        // Principal out reduced by full amount
+        assertEq(pool.poolLosses(),                      totalShortfall - swapOutAmount);                            // Shortfall from liquidation - BPT recovery (zero before)
+        assertEq(stakeLocker.bptLosses(),                totalBptBurn);                                              // BPTs burned (zero before)
+        assertEq(weth.balanceOf(pool.liquidityLocker()), weth_liquidityLockerBal + totalRecovered + swapOutAmount);  // Liquidation recovery + BPT recovery
+    }
 
     /************************/
     /*** Helper Functions ***/
@@ -145,7 +332,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         erc20_mint(MPL, 0, address(this), mplAmount);
 
         // Initialize MPL/WETH Balancer Pool
-        BPoolLike bPool = BPoolLike(BPoolFactoryLike(BPOOL_FACTORY).newBPool());
+        bPool = BPoolLike(BPoolFactoryLike(BPOOL_FACTORY).newBPool());
         weth.approve(address(bPool), type(uint256).max);
         mpl.approve(address(bPool), type(uint256).max);
         bPool.bind(WETH, wethAmount, 5 ether);
@@ -212,24 +399,38 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         poolDelegate.fundLoan(address(pool), loan, DL_FACTORY, fundAmount);
 
         uint256 drawableFunds      = IMapleLoan(loan).drawableFunds();
-        uint256 collateralRequired = LoanLike(loan).getAdditionalCollateralRequiredFor(drawableFunds);
+        uint256 collateralRequired = IMapleLoan(loan).getAdditionalCollateralRequiredFor(drawableFunds);
 
         if (collateralRequired > 0) {
             erc20_mint(WBTC, 0, address(borrower), collateralRequired);
-            borrower.approve(WBTC, loan, collateralRequired);
+            borrower.erc20_approve(WBTC, loan, collateralRequired);
         }
 
         borrower.loan_drawdownFunds(loan, drawableFunds, address(borrower));
     }
 
     function _makePayment(address loan, address borrower) internal returns (uint256 principalPortion, uint256 interestPortion) {
-        ( principalPortion, interestPortion ) = LoanLike(loan).getNextPaymentBreakdown();
+        ( principalPortion, interestPortion ) = IMapleLoan(loan).getNextPaymentBreakdown();
 
         uint256 total = principalPortion + interestPortion;
 
         erc20_mint(WETH, 3, address(borrower), total);
-        Borrower(borrower).approve(WETH, loan, total);
+        Borrower(borrower).erc20_approve(WETH, loan, total);
         Borrower(borrower).loan_makePayment(loan, total);
     }
+
+    function _liquidate(Keeper keeper, address strategy, IDebtLocker debtLocker, uint256 amount) internal {
+        keeper.strategy_flashBorrowLiquidation(
+            strategy, 
+            address(debtLocker.liquidator()), 
+            amount, 
+            type(uint256).max,
+            uint256(0),
+            WBTC, 
+            USDC, 
+            WETH, 
+            address(keeper)
+        );
+    } 
 }
 

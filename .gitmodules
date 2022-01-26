@@ -4,3 +4,9 @@
 [submodule "modules/loan"]
 	path = modules/loan
 	url = https://github.com/maple-labs/loan
+[submodule "modules/debt-locker"]
+	path = modules/debt-locker
+	url = git@github.com:maple-labs/debt-locker.git
+[submodule "modules/liquidations"]
+	path = modules/liquidations
+	url = git@github.com:maple-labs/liquidations.git

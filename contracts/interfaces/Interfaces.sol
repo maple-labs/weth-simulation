@@ -64,15 +64,23 @@ interface PoolFactoryLike {
     function createPool(address, address, address, address, uint256, uint256, uint256) external returns (address);
 }
 
+interface IPoolLibLike {
+    function getSwapOutValueLocker(address _bPool, address liquidityAsset, address stakeLocker) external view returns (uint256 swapOutValue_);
+}
+
 interface PoolLike {
     function balanceOf(address) external view returns (uint256);
     function claim(address, address) external returns (uint256[7] memory);
+    function debtLockers(address loan, address dlFactory) external returns (address);
     function deposit(uint256 amount_) external;
     function getInitialStakeRequirements() external view returns (uint256, uint256, bool, uint256, uint256);
     function getPoolSharesRequired(address, address, address, address, uint256) external view returns(uint256, uint256);
     function finalize() external;
     function fundLoan(address, address, uint256) external;
+    function interestSum() external view returns (uint256 interestSum_);
     function liquidityLocker() external view returns (address);
+    function principalOut() external view returns (uint256 principalOut_);
+    function poolLosses() external view returns (uint256 poolLossess_);
     function stakeLocker() external returns (address);
     function setAllowList(address, bool) external;
     function setOpenToPublic(bool open) external;
@@ -84,4 +92,5 @@ interface PoolLike {
 
 interface StakeLockerLike {
     function stake(uint256) external;
+    function bptLosses() external view returns (uint256 bptLossess_);
 }

@@ -13,7 +13,7 @@ contract Borrower {
         return LoanLike(loan_).drawdownFunds(amount_, destination_);
     }
 
-    function approve(address token, address account, uint256 amt) external {
+    function erc20_approve(address token, address account, uint256 amt) external {
         ERC20Like(token).approve(account, amt);
     }
 
