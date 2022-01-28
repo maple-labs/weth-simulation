@@ -11,17 +11,16 @@ import { Borrower }     from "./accounts/Borrower.sol";
 import { Keeper }       from "./accounts/Keeper.sol";
 import { PoolDelegate } from "./accounts/PoolDelegate.sol";
 
-import { IPoolLibLike, StakeLockerLike } from "../interfaces/Interfaces.sol";
+import { IPoolLibLike, IStakeLockerLike } from "../interfaces/Interfaces.sol";
 
 import { SushiswapStrategy } from "../../modules/liquidations/contracts/SushiswapStrategy.sol";
 import { UniswapV2Strategy } from "../../modules/liquidations/contracts/UniswapV2Strategy.sol";
 import { Liquidator }        from "../../modules/liquidations/contracts/Liquidator.sol";
 import { Rebalancer }        from "../../modules/liquidations/contracts/test/mocks/Mocks.sol";
 
+import { ChainlinkOracle } from "../../modules/chainlink-oraclce/contracts/ChainlinkOracle.sol";
 
-import { WETHOracleMock } from "./mocks/Mocks.sol";
-
-import { BPoolLike, BPoolFactoryLike, ERC20Like, Hevm, LoanInitializerLike, MapleGlobalsLike, PoolLike } from "../interfaces/Interfaces.sol";
+import { IBPoolLike, IBPoolFactoryLike, IERC20Like, IHevm, ILoanInitializerLike, IMapleGlobalsLike, IPoolLike } from "../interfaces/Interfaces.sol";
 
 import { AddressRegistry } from "../AddressRegistry.sol";
 
@@ -35,14 +34,13 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
     address[3] calcs;
 
-    ERC20Like constant weth = ERC20Like(WETH);
-    ERC20Like constant wbtc = ERC20Like(WBTC);
-    ERC20Like constant mpl = ERC20Like(MPL);
+    IERC20Like constant weth = IERC20Like(WETH);
+    IERC20Like constant wbtc = IERC20Like(WBTC);
+    IERC20Like constant mpl  = IERC20Like(MPL);
 
-    BPoolLike         bPool;
-    PoolDelegate      poolDelegate;
-    PoolLike          pool;
-    WETHOracleMock    oracleMock;
+    IBPoolLike      bPool;
+    PoolDelegate   poolDelegate;
+    IPoolLike       pool;
 
     uint256 start;
 
@@ -50,9 +48,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         start = block.timestamp;
 
-        calcs = [REPAYMENT_CALC, LATEFEE_CALC, PREMIUM_CALC];
-
-        oracleMock = new WETHOracleMock();
+        // calcs = [REPAYMENT_CALC, LATEFEE_CALC, PREMIUM_CALC];
 
         _setUpMapleWethPool();
     }
@@ -77,6 +73,9 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         // Check details for upcoming payment #1
         ( uint256 principalPortion, uint256 interestPortion ) = loan.getNextPaymentBreakdown();
 
+        assertEq(principalPortion, 0);
+        assertEq(interestPortion, 9863_013698630136000000);
+
         assertEq(weth.balanceOf(address(loan)), 0);
 
         // Make first payment
@@ -88,7 +87,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         /************************************/
         /*** Claim Funds as Pool Delegate ***/
-        /************************************/
+        // /************************************/
 
         uint256 pool_principalOut = pool.principalOut();
         uint256 pool_interestSum  = pool.interestSum();
@@ -259,8 +258,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         /*** Pool Delegate configures liquidation parameters ***/
         /*******************************************************/
 
-        poolDelegate.debtLocker_setAllowedSlippage(address(debtLocker), 300);        // 3% slippage allowed
-        poolDelegate.debtLocker_setMinRatio(address(debtLocker), 1);  // Minimum 40k USDC per WBTC (Market price is ~43k at block 13276702)
+        poolDelegate.debtLocker_setAllowedSlippage(address(debtLocker), 300);  // 3% slippage allowed
 
         /**********************************/
         /*** Collateral gets liquidated ***/
@@ -280,16 +278,16 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         uint256 pool_principalOut       = pool.principalOut();
         uint256 weth_liquidityLockerBal = weth.balanceOf(pool.liquidityLocker());
 
-        StakeLockerLike stakeLocker = StakeLockerLike(pool.stakeLocker());
+        IStakeLockerLike stakeLocker = IStakeLockerLike(pool.stakeLocker());
 
         uint256 swapOutAmount = IPoolLibLike(ORTHOGONAL_POOL_LIB).getSwapOutValueLocker(address(bPool), WETH, address(stakeLocker));
 
         uint256[7] memory details = poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
 
         uint256 totalPrincipal = 1_000_000 ether;
-        uint256 totalRecovered = 2447469579;                // Recovered from liquidation
+        uint256 totalRecovered = 28913375309783923686;                // Recovered from liquidation
         uint256 totalShortfall = totalPrincipal - totalRecovered;  
-        uint256 totalBptBurn = bpt_stakeLockerBal - bPool.balanceOf(address(stakeLocker));
+        uint256 totalBptBurn   = bpt_stakeLockerBal - bPool.balanceOf(address(stakeLocker));
 
         assertEq(details[0], totalRecovered);
         assertEq(details[1], 0);
@@ -325,40 +323,48 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         /*** Set up MPL/WETH Balancer Pool ***/
         /************************************/
 
-        uint256 wethAmount = 0.001 ether;
-        uint256 mplAmount  = 1 ether;  // $100k of MPL
+        uint256 wethAmount = 4 ether;
+        uint256 mplAmount  = 700 ether;  
+        // uint256 mplAmount = wethAmount * WAD / (usdcBPool.getSpotPrice(USDC, MPL) * WAD / 10 ** 6);
 
         erc20_mint(WETH, 3, address(this), wethAmount);
         erc20_mint(MPL, 0, address(this), mplAmount);
 
         // Initialize MPL/WETH Balancer Pool
-        bPool = BPoolLike(BPoolFactoryLike(BPOOL_FACTORY).newBPool());
+        bPool = IBPoolLike(IBPoolFactoryLike(BPOOL_FACTORY).newBPool());
         weth.approve(address(bPool), type(uint256).max);
         mpl.approve(address(bPool), type(uint256).max);
         bPool.bind(WETH, wethAmount, 5 ether);
         bPool.bind(MPL, mplAmount, 5 ether);
         bPool.finalize();
 
-        // Transfer all BPT to Pool Delegate for initial staking
-        bPool.transfer(address(poolDelegate), 40 * WAD);  // Pool Delegate gets enought BPT to stake
+        // Transfer max amount of burnable BPTs  
+        bPool.transfer(address(poolDelegate), 99 * WAD);  // Pool Delegate gets enought BPT to stake
+
+        /*********************/
+        /*** Create Oracle ***/
+        /*********************/
+
+        address ethOracle = address(new ChainlinkOracle(ETH_USD_ORACLE,WETH, address(this)));
 
         /*************************/
         /*** Configure Globals ***/
         /*************************/
 
-        MapleGlobalsLike globals = MapleGlobalsLike(MAPLE_GLOBALS);
+        IMapleGlobalsLike globals = IMapleGlobalsLike(MAPLE_GLOBALS);
 
         globals.setLiquidityAsset(WETH, true);
         globals.setPoolDelegateAllowlist(address(poolDelegate), true);
         globals.setValidBalancerPool(address(bPool), true);
-        globals.setPriceOracle(WETH, address(oracleMock));
+        globals.setPriceOracle(WETH, address(ethOracle));
+        globals.setSwapOutRequired(10000);
 
         /*******************************************************/
         /*** Set up new WETH liquidity pool, closed to public ***/
         /*******************************************************/
 
         // Create a WETH pool with a 5m liquidity cap
-        pool = PoolLike(poolDelegate.createPool(POOL_FACTORY, WETH, address(bPool), SL_FACTORY, LL_FACTORY, 1000, 1000, 5_000_000 ether));
+        pool = IPoolLike(poolDelegate.createPool(POOL_FACTORY, WETH, address(bPool), SL_FACTORY, LL_FACTORY, 1000, 1000, 5_000_000 ether));
 
         // Stake BPT for insurance and finalize pool
         poolDelegate.approve(address(bPool), pool.stakeLocker(), type(uint256).max);
@@ -388,7 +394,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         uint256[4] memory rates = [uint256(0.12e18), uint256(0), uint256(0), uint256(0.6e18)];
 
 
-        bytes memory arguments = LoanInitializerLike(LOAN_INITIALIZER).encodeArguments(address(borrower), assets, termDetails, requests, rates);
+        bytes memory arguments = ILoanInitializerLike(LOAN_INITIALIZER).encodeArguments(address(borrower), assets, termDetails, requests, rates);
 
         bytes32 salt = keccak256(abi.encodePacked("salt"));
 
@@ -427,7 +433,7 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
             type(uint256).max,
             uint256(0),
             WBTC, 
-            USDC, 
+            address(0), 
             WETH, 
             address(keeper)
         );

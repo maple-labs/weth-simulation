@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
 pragma solidity 0.8.7;
 
 contract AddressRegistry {
@@ -10,7 +11,8 @@ contract AddressRegistry {
     address constant WETH = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
     address constant WBTC = 0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599;
 
-    address constant BPOOL_FACTORY = 0x9424B1412450D0f8Fc2255FAf6046b98213B76Bd;
+    address constant BPOOL_FACTORY   = 0x9424B1412450D0f8Fc2255FAf6046b98213B76Bd;
+    address constant ETH_USD_ORACLE = 0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419;
 
     /***********************************/
     /*** Deployed Protocol Contracts ***/
@@ -25,24 +27,14 @@ contract AddressRegistry {
     address constant LOAN_FACTORY        = 0x36a7350309B2Eb30F3B908aB0154851B5ED81db0;
     address constant LOAN_INITIALIZER    = 0xCba99a6648450a7bE7f20B1C3258F74Adb662020;
     address constant MPL_REWARDS_FACTORY = 0x0155729EbCd47Cb1fBa02bF5a8DA20FaF3860535;
-    address constant CL_FACTORY          = 0xEE3e59D381968f4F9C92460D9d5Cfcf5d3A67987;
     address constant DL_FACTORY          = 0xA83404CAA79989FfF1d84bA883a1b8187397866C;
-    address constant FL_FACTORY          = 0x0eB96A53EC793a244876b018073f33B23000F25b;
     address constant SL_FACTORY          = 0x53a597A4730Eb02095dD798B203Dcc306348B8d6;
     address constant LL_FACTORY          = 0x966528BB1C44f96b3AA8Fbf411ee896116b068C9;
-    address constant REPAYMENT_CALC      = 0x7d622bB6Ed13a599ec96366Fa95f2452c64ce602;
-    address constant LATEFEE_CALC        = 0x8dC5aa328142aa8a008c25F66a77eaA8E4B46f3c;
-    address constant PREMIUM_CALC        = 0xe88Ab4Cf1Ec06840d16feD69c964aD9DAFf5c6c2;
 
     /*******************************/
     /*** Deployed Pool Contracts ***/
     /*******************************/
-    
-    address constant ORTHOGONAL_PD       = 0xA6cCb9483E3E7a737E3a4F5B72a1Ce51838ba122;
-    address constant ORTHOGONAL_POOL     = 0xFeBd6F15Df3B73DC4307B1d7E65D46413e710C27;
+
     address constant ORTHOGONAL_POOL_LIB = 0x2c1C30fb8cC313Ef3cfd2E2bBf2da88AdD902C30;
-    address constant ORTHOGONAL_SL       = 0x12B2BbBfAB2CE6789DF5659E9AC27A4A91C96C5C;
-    address constant ORTHOGONAL_LL       = 0xB5321058E209E0F6C1216A7c7922B6962681DD77;
-    address constant ORTHOGONAL_REWARDS  = 0x7869D7a3B074b5fa484dc04798E254c9C06A5e90;
 
 }
