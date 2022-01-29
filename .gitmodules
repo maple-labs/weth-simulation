@@ -10,6 +10,6 @@
 [submodule "modules/liquidations"]
 	path = modules/liquidations
 	url = git@github.com:maple-labs/liquidations.git
-[submodule "modules/chainlink-oraclce"]
-	path = modules/chainlink-oraclce
-	url = git@github.com:maple-labs/chainlink-oracle.git
+[submodule "modules/chainlink-oracle"]
+	path = modules/chainlink-oracle
+	url = https://github.com/maple-labs/chainlink-oracle

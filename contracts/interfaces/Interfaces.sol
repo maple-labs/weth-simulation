@@ -21,10 +21,11 @@ interface IERC20Like {
     function totalSupply() external view returns (uint256);
 }
 
-interface IHevm {
-    function warp(uint256) external;
-    function store(address,bytes32,bytes32) external;
+interface Vm {
     function load(address,bytes32) external view returns (bytes32);
+    function store(address,bytes32,bytes32) external;
+    function warp(uint256) external;
+    function expectRevert(bytes calldata) external;
 }
 
 interface ILoanFactoryLike {
@@ -50,6 +51,7 @@ interface ILoanLike {
 }
 
 interface IMapleGlobalsLike {
+    function getLatestPrice(address) external view returns (uint256);
     function setLiquidityAsset(address, bool) external;
     function setCollateralAsset(address, bool) external;
     function setPoolDelegateAllowlist(address, bool) external;
@@ -83,12 +85,15 @@ interface IPoolLike {
     function setAllowList(address, bool) external;
     function setOpenToPublic(bool open) external;
     function superFactory() external view returns (address);
+    function totalSupply() external view returns (uint256);
     function triggerDefault(address loan, address dlFactory) external;
     function withdrawableFundsOf(address) external view returns (uint256);
     function withdrawCooldown(address) external view returns (uint256);
 }
 
 interface IStakeLockerLike {
-    function stake(uint256) external;
     function bptLosses() external view returns (uint256 bptLossess_);
+    function fundsTokenBalance() external view returns (uint256 interestSums_);
+    function stake(uint256) external;
+    function totalSupply() external view returns (uint256);
 }
