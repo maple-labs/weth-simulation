@@ -58,6 +58,7 @@ interface IMapleGlobalsLike {
     function setPriceOracle(address, address) external;
     function setSwapOutRequired(uint256) external;
     function setValidBalancerPool(address, bool) external;
+    function getLpCooldownParams() external view returns (uint256, uint256);
 }
 
 interface IPoolFactoryLike {
@@ -78,15 +79,19 @@ interface IPoolLike {
     function finalize() external;
     function fundLoan(address, address, uint256) external;
     function interestSum() external view returns (uint256 interestSum_);
+    function intendToWithdraw() external;
     function liquidityLocker() external view returns (address);
+    function lockupPeriod() external view returns (uint256);
     function principalOut() external view returns (uint256 principalOut_);
     function poolLosses() external view returns (uint256 poolLossess_);
+    function recognizableLossesOf(address) external view returns (uint256);
     function stakeLocker() external returns (address);
     function setAllowList(address, bool) external;
     function setOpenToPublic(bool open) external;
     function superFactory() external view returns (address);
     function totalSupply() external view returns (uint256);
     function triggerDefault(address loan, address dlFactory) external;
+    function withdraw(uint256) external;
     function withdrawableFundsOf(address) external view returns (uint256);
     function withdrawCooldown(address) external view returns (uint256);
 }

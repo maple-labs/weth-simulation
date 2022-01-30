@@ -9,14 +9,12 @@ import { IDebtLocker } from "../../modules/debt-locker/contracts/interfaces/IDeb
 
 import { Borrower }     from "./accounts/Borrower.sol";
 import { Keeper }       from "./accounts/Keeper.sol";
+import { LP }           from "./accounts/LP.sol";
 import { PoolDelegate } from "./accounts/PoolDelegate.sol";
 
 import { IPoolLibLike, IStakeLockerLike } from "../interfaces/Interfaces.sol";
 
-import { SushiswapStrategy } from "../../modules/liquidations/contracts/SushiswapStrategy.sol";
 import { UniswapV2Strategy } from "../../modules/liquidations/contracts/UniswapV2Strategy.sol";
-import { Liquidator }        from "../../modules/liquidations/contracts/Liquidator.sol";
-import { Rebalancer }        from "../../modules/liquidations/contracts/test/mocks/Mocks.sol";
 
 import { ChainlinkOracle } from "../../modules/chainlink-oracle/contracts/ChainlinkOracle.sol";
 
@@ -48,6 +46,12 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
     }
 
     function test_fundLoan() external {
+
+        // Deposit to pool
+        erc20_mint(WETH, 3, address(this), 20_000 ether);
+        weth.approve(address(pool), 20_000 ether);
+        pool.deposit(20_000 ether);
+
         Borrower borrower = new Borrower();
 
         IMapleLoan loan = IMapleLoan(_createLoan(borrower, 0, 10_000 ether));
@@ -95,11 +99,16 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
     function test_loan_endToEnd() external {
 
-        Borrower borrower = new Borrower();
+        // Deposit to pool
+        erc20_mint(WETH, 3, address(this), 20_000 ether);
+        weth.approve(address(pool), 20_000 ether);
+        pool.deposit(20_000 ether);
 
         /********************************/
         /*** Create and drawdown loan ***/
         /********************************/
+
+        Borrower borrower = new Borrower();
 
         IMapleLoan loan = IMapleLoan(_createLoan(borrower, 0, 10_000 ether));
 
@@ -226,11 +235,16 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
     function test_triggerDefault_underCollateralized() external {
 
-        Borrower borrower = new Borrower();
+        // Deposit to pool
+        erc20_mint(WETH, 3, address(this), 20_000 ether);
+        weth.approve(address(pool), 20_000 ether);
+        pool.deposit(20_000 ether);
 
         /********************************/
         /*** Create and drawdown loan ***/
         /********************************/
+
+        Borrower borrower = new Borrower();
 
         IMapleLoan loan = IMapleLoan(_createLoan(borrower, 2 * BTC, 10_000 ether));
 
@@ -361,6 +375,141 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         assertEq(stakeLocker.bptLosses(),                18.3503521120338435 ether);  // Roughly 1/6 of original amount
 
         assertEq(bPool_stakeLockerBal - bPool.balanceOf(pool.stakeLocker()), stakeLocker.bptLosses());
+    }
+
+    function test_poolFDT_multiUser_interestAndLosses() external {
+        Borrower borrower = new Borrower();
+
+        LP lp1 = new LP();
+        LP lp2 = new LP();
+
+        erc20_mint(WETH, 3, address(lp1), 20_000 ether);
+        erc20_mint(WETH, 3, address(lp2), 30_000 ether);
+        lp1.approve(WETH, address(pool), 20_000 ether);
+        lp2.approve(WETH, address(pool), 30_000 ether);
+        lp1.deposit(address(pool), 20_000 ether);  // 40% equity
+        lp2.deposit(address(pool), 30_000 ether);  // 60% equity
+
+        /**************************************************/
+        /*** Create and drawdown loan, make one payment ***/
+        /**************************************************/
+
+        IMapleLoan loan = IMapleLoan(_createLoan(borrower, 2 * BTC, 10_000 ether));
+        _fundLoanAndDrawdown(borrower, address(loan), 10_000 ether);
+        vm.warp(loan.nextPaymentDueDate());
+
+        ( , uint256 interestPortion ) = _makePayment(address(loan), address(borrower));
+        assertEq(interestPortion, 98.63013698630136 ether);
+
+        /************************************************/
+        /*** Pool claims funds, distributing interest ***/
+        /************************************************/
+
+        uint256 netInterest = interestPortion * 80/100;  // Net of ongoing fees
+
+        assertEq(pool.interestSum(),                     0);
+        assertEq(pool.withdrawableFundsOf(address(lp1)), 0);
+        assertEq(pool.withdrawableFundsOf(address(lp2)), 0);
+
+        poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        assertEq(pool.interestSum(), netInterest);
+
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp1)), netInterest * 40/100, 1);
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp2)), netInterest * 60/100, 1);
+
+        /**********************************/
+        /*** LP2 deposits, LP3 deposits ***/
+        /**********************************/
+
+        LP lp3 = new LP();
+
+        erc20_mint(WETH, 3, address(lp2), 20_000 ether);
+        erc20_mint(WETH, 3, address(lp3), 30_000 ether);
+        lp2.approve(WETH, address(pool), 20_000 ether);
+        lp3.approve(WETH, address(pool), 30_000 ether);
+        lp2.deposit(address(pool), 20_000 ether);  // 50% equity
+        lp3.deposit(address(pool), 30_000 ether);  // 30% equity, LP1 now at 20% equity
+
+        // New deposits have no impact on previous interest earnings
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp1)), netInterest * 40/100, 1);
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp2)), netInterest * 60/100, 1);
+
+        assertEq(pool.withdrawableFundsOf(address(lp3)), 0);
+
+        /****************************************************/
+        /*** Make another payment and distribute interest ***/
+        /****************************************************/
+
+        _makePayment(address(loan), address(borrower));  // Same interestPortion
+
+        poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        assertEq(pool.interestSum(), netInterest * 2);
+
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp1)), (netInterest * 40/100) + (netInterest * 20/100), 1);
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp2)), (netInterest * 60/100) + (netInterest * 50/100), 1);
+        assertWithinDiff(pool.withdrawableFundsOf(address(lp3)), (netInterest *  0/100) + (netInterest * 30/100), 1);
+
+        /**************************************/
+        /*** Pool Delegate triggers default ***/
+        /**************************************/
+
+        assertEq(pool.poolLosses(),                       0);
+        assertEq(pool.recognizableLossesOf(address(lp1)), 0);
+        assertEq(pool.recognizableLossesOf(address(lp2)), 0);
+        assertEq(pool.recognizableLossesOf(address(lp3)), 0);
+
+        // Trigger default
+        vm.warp(loan.nextPaymentDueDate() + loan.gracePeriod() + 1);
+        poolDelegate.triggerDefault(address(pool),address(loan), address(DL_FACTORY));
+
+        // Liquidate collateral
+        IDebtLocker       debtLocker        = IDebtLocker(pool.debtLockers(address(loan), address(DL_FACTORY)));
+        Keeper            keeper1           = new Keeper();
+        UniswapV2Strategy uniswapV2Strategy = new UniswapV2Strategy();
+        poolDelegate.debtLocker_setAllowedSlippage(address(debtLocker), 300);  // 3% slippage allowed
+        _liquidate(keeper1, address(uniswapV2Strategy), debtLocker, 2 * BTC);
+        assertEq(wbtc.balanceOf(address(debtLocker.liquidator())), 0);
+
+        // Claim liquidated funds, burn BPTs, update accounting
+        poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
+
+        uint256 poolLosses = 9_969.723385413367221262 ether;
+
+        assertEq(pool.poolLosses(), poolLosses);
+        assertWithinDiff(pool.recognizableLossesOf(address(lp1)), poolLosses * 20/100, 1);
+        assertWithinDiff(pool.recognizableLossesOf(address(lp2)), poolLosses * 50/100, 1);
+        assertWithinDiff(pool.recognizableLossesOf(address(lp3)), poolLosses * 30/100, 1);
+
+        /************************/
+        /*** All LPs withdraw ***/
+        /************************/
+
+        assertEq(weth.balanceOf(pool.liquidityLocker()), 100_000 ether + netInterest * 2 - poolLosses);
+
+        vm.warp(block.timestamp + pool.lockupPeriod());
+
+        lp1.intendToWithdraw(address(pool));
+        lp2.intendToWithdraw(address(pool));
+        lp3.intendToWithdraw(address(pool));
+
+        ( uint256 cooldownPeriod, ) = IMapleGlobalsLike(MAPLE_GLOBALS).getLpCooldownParams();
+
+        vm.warp(block.timestamp + cooldownPeriod);
+
+        lp1.withdraw(address(pool), 20_000 ether);
+        _assertPoolInvariant();
+        lp2.withdraw(address(pool), 50_000 ether);
+        _assertPoolInvariant();
+        lp3.withdraw(address(pool), 30_000 ether);
+        _assertPoolInvariant();
+
+        assertWithinDiff(weth.balanceOf(pool.liquidityLocker()), 0, 1);
+
+        assertWithinDiff(weth.balanceOf(address(lp1)), 20_000 ether + (netInterest * 40/100) + (netInterest * 20/100) - poolLosses * 20/100, 1);
+        assertWithinDiff(weth.balanceOf(address(lp2)), 50_000 ether + (netInterest * 60/100) + (netInterest * 50/100) - poolLosses * 50/100, 1);
+        assertWithinDiff(weth.balanceOf(address(lp3)), 30_000 ether + (netInterest *  0/100) + (netInterest * 30/100) - poolLosses * 30/100, 1);
     }
 
     /************************/
@@ -496,18 +645,13 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         /********************************************************/
 
         // Create a WETH pool with a 5m liquidity cap
-        pool = IPoolLike(poolDelegate.createPool(POOL_FACTORY, WETH, address(bPool), SL_FACTORY, LL_FACTORY, 1000, 1000, 50_000 ether));
+        pool = IPoolLike(poolDelegate.createPool(POOL_FACTORY, WETH, address(bPool), SL_FACTORY, LL_FACTORY, 1000, 1000, 150_000 ether));
 
         // Stake BPT for insurance and finalize pool
         poolDelegate.approve(address(bPool), pool.stakeLocker(), type(uint256).max);
         poolDelegate.stake(pool.stakeLocker(), bPool.balanceOf(address(poolDelegate)));
         poolDelegate.finalize(address(pool));
         poolDelegate.setOpenToPublic(address(pool), true);
-
-        // Deposit to pool
-        erc20_mint(WETH, 3, address(this), 20_000 ether);
-        weth.approve(address(pool), 20_000 ether);
-        pool.deposit(20_000 ether);
     }
 
 }
