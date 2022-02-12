@@ -11,6 +11,7 @@ interface IBPoolLike {
     function bind(address, uint256, uint256) external;
     function finalize() external;
     function getSpotPrice(address, address) external returns (uint256);
+    function joinPool(uint poolAmountOut, uint[] calldata maxAmountsIn) external;
     function transfer(address, uint256) external returns (bool);
 }
 

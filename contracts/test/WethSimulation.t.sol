@@ -28,13 +28,13 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
     uint256 constant USD = 10 ** 6;
     uint256 constant WAD = 10 ** 18;
 
-    IERC20Like constant mpl  = IERC20Like(MPL);
-    IERC20Like constant weth = IERC20Like(WETH);
+    IERC20Like constant mpl   = IERC20Like(MPL);
     IERC20Like constant wbtc = IERC20Like(WBTC);
+    IERC20Like constant weth  = IERC20Like(WETH);
+    IBPoolLike constant bPool = IBPoolLike(BPOOL);
 
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
-    IBPoolLike   bPool;
     IPoolLike    pool;
     PoolDelegate poolDelegate;
 
@@ -475,7 +475,8 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         // Claim liquidated funds, burn BPTs, update accounting
         poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
 
-        uint256 poolLosses = 9_969.723385413367221262 ether;
+        // uint256 poolLosses = 9_969.723385413367221262 ether;
+        uint256 poolLosses = 9_966.306924132935515573 ether;
 
         assertEq(pool.poolLosses(), poolLosses);
         assertWithinDiff(pool.recognizableLossesOf(address(lp1)), poolLosses * 20/100, 1);
@@ -596,12 +597,6 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         poolDelegate = new PoolDelegate();
 
-        /*********************/
-        /*** Create Oracle ***/
-        /*********************/
-
-        address ethOracle = address(new ChainlinkOracle(ETH_USD_ORACLE, WETH, address(this)));
-
         /*************************/
         /*** Configure Globals ***/
         /*************************/
@@ -610,35 +605,38 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         globals.setLiquidityAsset(WETH, true);
         globals.setPoolDelegateAllowlist(address(poolDelegate), true);
-        globals.setPriceOracle(WETH, address(ethOracle));
+        // globals.setPriceOracle(WETH, address(ethOracle));
         globals.setSwapOutRequired(10_000);
 
         /*************************************/
         /*** Set up MPL/WETH Balancer Pool ***/
         /*************************************/
 
-        IBPoolLike usdcBPool = IBPoolLike(BALANCER_POOL);
+        emit log_named_uint("weth price", globals.getLatestPrice(WETH));
 
-        uint256 wethAmount     = 4 ether;
-        uint256 wethAmount_usd = wethAmount * globals.getLatestPrice(WETH) / 10 ** 8;  // WAD precision
-        uint256 mplAmount      = wethAmount_usd * WAD / (usdcBPool.getSpotPrice(USDC, MPL) * WAD / 10 ** 6);
+        erc20_mint(MPL,  0, address(this), 2250 ether);
+        erc20_mint(WETH, 3, address(this), 17 ether);
 
-        erc20_mint(WETH, 3, address(this), wethAmount);
-        erc20_mint(MPL,  0, address(this), mplAmount);
+        mpl.approve(address(bPool),  2250 ether);
+        weth.approve(address(bPool), 17 ether);
 
-        // Initialize MPL/WETH Balancer Pool
-        bPool = IBPoolLike(IBPoolFactoryLike(BPOOL_FACTORY).newBPool());
-        weth.approve(address(bPool), type(uint256).max);
-        mpl.approve(address(bPool), type(uint256).max);
-        bPool.bind(WETH, wethAmount, 5 ether);
-        bPool.bind(MPL,  mplAmount,  5 ether);
-        bPool.finalize();
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 2250 ether;
+        amounts[1] = 17 ether;
+
+        emit log_named_uint("weth.balanceOf(address(this))", weth.balanceOf(address(this)));
+        emit log_named_uint("mpl.balanceOf(address(this)) ", mpl.balanceOf(address(this)));
+
+        bPool.joinPool(47_000 ether, amounts);
+
+        emit log_named_uint("weth.balanceOf(address(this))", weth.balanceOf(address(this)));
+        emit log_named_uint("mpl.balanceOf(address(this)) ", mpl.balanceOf(address(this)));
 
         // Add to globals
         globals.setValidBalancerPool(address(bPool), true);
 
-        // Transfer max amount of burnable BPTs (Can't stake totalSupply)
-        bPool.transfer(address(poolDelegate), 99.99 ether);  // Pool Delegate gets enought BPT to stake
+        // // Transfer max amount of burnable BPTs (Can't stake totalSupply)
+        bPool.transfer(address(poolDelegate), 47_000 ether);  // Pool Delegate gets enought BPT to stake
 
         /********************************************************/
         /*** Set up new WETH liquidity pool, closed to public ***/
