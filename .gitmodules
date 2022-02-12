@@ -1,3 +1,15 @@
-[submodule "modules/contract-test-suite"]
-	path = modules/contract-test-suite
-	url = git@github.com:maple-labs/contract-test-suite.git
+[submodule "modules/contract-test-utils"]
+	path = modules/contract-test-utils
+	url = git@github.com:maple-labs/contract-test-utils.git
+[submodule "modules/loan"]
+	path = modules/loan
+	url = https://github.com/maple-labs/loan
+[submodule "modules/debt-locker"]
+	path = modules/debt-locker
+	url = git@github.com:maple-labs/debt-locker.git
+[submodule "modules/liquidations"]
+	path = modules/liquidations
+	url = git@github.com:maple-labs/liquidations.git
+[submodule "modules/chainlink-oracle"]
+	path = modules/chainlink-oracle
+	url = https://github.com/maple-labs/chainlink-oracle
