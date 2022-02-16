@@ -22,19 +22,19 @@ import { IBPoolLike, IBPoolFactoryLike, IERC20Like, Vm, ILoanInitializerLike, IM
 
 import { AddressRegistry } from "../AddressRegistry.sol";
 
-contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
+contract WethSimulationLive is AddressRegistry, StateManipulations, TestUtils {
 
     uint256 constant BTC = 10 ** 8;
     uint256 constant USD = 10 ** 6;
     uint256 constant WAD = 10 ** 18;
 
-    IERC20Like constant mpl  = IERC20Like(MPL);
-    IERC20Like constant weth = IERC20Like(WETH);
+    IERC20Like constant mpl   = IERC20Like(MPL);
     IERC20Like constant wbtc = IERC20Like(WBTC);
+    IERC20Like constant weth  = IERC20Like(WETH);
+    IBPoolLike constant bPool = IBPoolLike(BPOOL);
 
     Vm constant vm = Vm(0x7109709ECfa91a80626fF3989D68f67F5b1DD12D);
 
-    IBPoolLike   bPool;
     IPoolLike    pool;
     PoolDelegate poolDelegate;
 
@@ -334,14 +334,14 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         uint256 swapOutAmount = IPoolLibLike(POOL_LIB).getSwapOutValueLocker(address(bPool), WETH, address(stakeLocker));
 
-        assertEq(swapOutAmount, 1.333333333333333336 ether);  // 8 ether / 6
+        assertEq(swapOutAmount, 5.338000000000000010 ether);
 
-        uint256 totalRecoveredFromLiquidation = 28.943281253299445402 ether;
+        uint256 totalRecoveredFromLiquidation = 28.355075867064484417 ether;
 
         uint256 bPool_stakeLockerBal    = bPool.balanceOf(pool.stakeLocker());
         uint256 weth_liquidityLockerBal = weth.balanceOf(pool.liquidityLocker());
 
-        assertEq(bPool.balanceOf(pool.stakeLocker()),    99.99 ether);
+        assertEq(bPool.balanceOf(pool.stakeLocker()),    47_000 ether);
         assertEq(weth.balanceOf(pool.liquidityLocker()), 10_078.904109589041088 ether);
         assertEq(weth.balanceOf(address(debtLocker)),    totalRecoveredFromLiquidation);
         assertEq(pool.principalOut(),                    10_000 ether);
@@ -363,16 +363,16 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         assertEq(details[5], totalRecoveredFromLiquidation);
         assertEq(details[6], 10_000 ether - totalRecoveredFromLiquidation);
 
-        assertEq(bPool.balanceOf(pool.stakeLocker()),    81.6396478879661565 ether);  // Roughly 5/6 of original amount
-        assertEq(weth.balanceOf(pool.liquidityLocker()), 10_109.180724175673866738 ether);
+        assertEq(bPool.balanceOf(pool.stakeLocker()),    38_342.543213806817358200 ether);  // Roughly 5/6 of original amount
+        assertEq(weth.balanceOf(pool.liquidityLocker()), 10_112.597185456105572427 ether);
         assertEq(weth.balanceOf(pool.liquidityLocker()), weth_liquidityLockerBal + totalRecoveredFromLiquidation + swapOutAmount);
         assertEq(weth.balanceOf(address(debtLocker)),    0);
         assertEq(pool.principalOut(),                    0);
         assertEq(pool.interestSum(),                     78.904109589041088 ether);
-        assertEq(pool.poolLosses(),                      9_969.723385413367221262 ether);
+        assertEq(pool.poolLosses(),                      9_966.306924132935515573 ether);
         assertEq(pool.poolLosses(),                      10_000 ether - totalRecoveredFromLiquidation - swapOutAmount);
         assertEq(stakeLocker.fundsTokenBalance(),        9.863013698630136 ether);
-        assertEq(stakeLocker.bptLosses(),                18.3503521120338435 ether);  // Roughly 1/6 of original amount
+        assertEq(stakeLocker.bptLosses(),                8_657.456786193182641800 ether);  // Roughly 1/6 of original amount
 
         assertEq(bPool_stakeLockerBal - bPool.balanceOf(pool.stakeLocker()), stakeLocker.bptLosses());
     }
@@ -475,7 +475,8 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
         // Claim liquidated funds, burn BPTs, update accounting
         poolDelegate.claim(address(pool),address(loan), address(DL_FACTORY));
 
-        uint256 poolLosses = 9_969.723385413367221262 ether;
+        // uint256 poolLosses = 9_969.723385413367221262 ether;
+        uint256 poolLosses = 9_966.306924132935515573 ether;
 
         assertEq(pool.poolLosses(), poolLosses);
         assertWithinDiff(pool.recognizableLossesOf(address(lp1)), poolLosses * 20/100, 1);
@@ -596,12 +597,6 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         poolDelegate = new PoolDelegate();
 
-        /*********************/
-        /*** Create Oracle ***/
-        /*********************/
-
-        address ethOracle = address(new ChainlinkOracle(ETH_USD_ORACLE, WETH, address(this)));
-
         /*************************/
         /*** Configure Globals ***/
         /*************************/
@@ -610,35 +605,38 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
 
         globals.setLiquidityAsset(WETH, true);
         globals.setPoolDelegateAllowlist(address(poolDelegate), true);
-        globals.setPriceOracle(WETH, address(ethOracle));
+        // globals.setPriceOracle(WETH, address(ethOracle));
         globals.setSwapOutRequired(10_000);
 
         /*************************************/
         /*** Set up MPL/WETH Balancer Pool ***/
         /*************************************/
 
-        IBPoolLike usdcBPool = IBPoolLike(BALANCER_POOL);
+        emit log_named_uint("weth price", globals.getLatestPrice(WETH));
 
-        uint256 wethAmount     = 4 ether;
-        uint256 wethAmount_usd = wethAmount * globals.getLatestPrice(WETH) / 10 ** 8;  // WAD precision
-        uint256 mplAmount      = wethAmount_usd * WAD / (usdcBPool.getSpotPrice(USDC, MPL) * WAD / 10 ** 6);
+        erc20_mint(MPL,  0, address(this), 2250 ether);
+        erc20_mint(WETH, 3, address(this), 17 ether);
 
-        erc20_mint(WETH, 3, address(this), wethAmount);
-        erc20_mint(MPL,  0, address(this), mplAmount);
+        mpl.approve(address(bPool),  2250 ether);
+        weth.approve(address(bPool), 17 ether);
 
-        // Initialize MPL/WETH Balancer Pool
-        bPool = IBPoolLike(IBPoolFactoryLike(BPOOL_FACTORY).newBPool());
-        weth.approve(address(bPool), type(uint256).max);
-        mpl.approve(address(bPool), type(uint256).max);
-        bPool.bind(WETH, wethAmount, 5 ether);
-        bPool.bind(MPL,  mplAmount,  5 ether);
-        bPool.finalize();
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 2250 ether;
+        amounts[1] = 17 ether;
+
+        emit log_named_uint("weth.balanceOf(address(this))", weth.balanceOf(address(this)));
+        emit log_named_uint("mpl.balanceOf(address(this)) ", mpl.balanceOf(address(this)));
+
+        bPool.joinPool(47_000 ether, amounts);
+
+        emit log_named_uint("weth.balanceOf(address(this))", weth.balanceOf(address(this)));
+        emit log_named_uint("mpl.balanceOf(address(this)) ", mpl.balanceOf(address(this)));
 
         // Add to globals
         globals.setValidBalancerPool(address(bPool), true);
 
-        // Transfer max amount of burnable BPTs (Can't stake totalSupply)
-        bPool.transfer(address(poolDelegate), 99.99 ether);  // Pool Delegate gets enought BPT to stake
+        // // Transfer max amount of burnable BPTs (Can't stake totalSupply)
+        bPool.transfer(address(poolDelegate), 47_000 ether);  // Pool Delegate gets enought BPT to stake
 
         /********************************************************/
         /*** Set up new WETH liquidity pool, closed to public ***/
@@ -655,3 +653,4 @@ contract WethSimulation is AddressRegistry, StateManipulations, TestUtils {
     }
 
 }
+

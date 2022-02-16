@@ -12,12 +12,9 @@ done
 runs=$([ -z "$runs" ] && echo "100" || echo "$runs")
 
 export PROPTEST_CASES=$runs
-export DAPP_FORK_BLOCK=14192373
-export DAPP_TEST_NUMBER=14192373
-export DAPP_TEST_TIMESTAMP=1644683766
 
-if [ -z "$test" ]; then match="[src/test/*.t.sol]"; else match=$test; fi
+if [ -z "$test" ]; then match="[src/test/WethSimulation.t.sol]"; else match=$test; fi
 
 rm -rf out
 
-forge test --match "$match" -vvv --lib-paths "modules" --fork-url "$ETH_RPC_URL"
+forge test --match "$match" -vvv --lib-paths "modules" --fork-url "$ETH_RPC_URL" --fork-block-number 14096849
